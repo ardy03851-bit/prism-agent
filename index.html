@@ -2,15 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Prism — AI Agent Workspace</title>
   <meta name="description" content="A minimal multi-model AI agent workspace. Add models via models.json, use free models with no API key, and let the ensemble mode plan, draft, and polish." />
+  <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#211f1b" media="(prefers-color-scheme: dark)" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="preconnect" href="https://api.fontshare.com" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
+  <link href="https://api.fontshare.com/v2/css?f[]=zodiak@400,500,600&f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script>
+    /* set theme before first paint — no flash */
+    (function () {
+      try {
+        var t = JSON.parse(localStorage.getItem('prism.theme'));
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+      } catch (e) { /* sandboxed — default light */ }
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -21,15 +33,10 @@
       <div class="sidebar-top">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
-              <path d="M16 3 L28 26 H4 Z" stroke="url(#g1)" stroke-width="2.4" stroke-linejoin="round"/>
-              <path d="M16 3 L16 26" stroke="url(#g1)" stroke-width="1.6" opacity=".55"/>
-              <path d="M16 3 L4 26" stroke="url(#g1)" stroke-width="1.6" opacity=".55"/>
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stop-color="#8ef0cf"/><stop offset="1" stop-color="#8ab8ff"/>
-                </linearGradient>
-              </defs>
+            <svg viewBox="0 0 32 32" width="20" height="20" fill="none">
+              <path d="M16 4 L28 27 H4 Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+              <path d="M16 4 L16 27" stroke="currentColor" stroke-width="1.5" opacity=".5"/>
+              <path d="M16 4 L4 27" stroke="currentColor" stroke-width="1.5" opacity=".5"/>
             </svg>
           </div>
           <div class="brand-name">Prism</div>
@@ -60,27 +67,17 @@
           <button class="chip chip-ghost only-desktop" id="btnAbout" data-testid="button-about">
             <i data-lucide="sparkles"></i><span>How it works</span>
           </button>
+          <button class="icon-btn" id="btnTheme" aria-label="Switch to dark mode" title="Toggle theme" data-testid="button-theme">
+            <i data-lucide="moon"></i>
+          </button>
         </div>
       </header>
 
       <div class="messages" id="messages" aria-live="polite">
         <!-- Empty state -->
         <div class="empty-state" id="emptyState">
-          <div class="empty-orb" aria-hidden="true">
-            <svg viewBox="0 0 64 64" width="56" height="56" fill="none">
-              <path d="M32 6 L56 52 H8 Z" stroke="url(#eg)" stroke-width="3" stroke-linejoin="round"/>
-              <path d="M32 6 L32 52" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
-              <path d="M32 6 L8 52" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
-              <path d="M20 29 L32 52 L44 29" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
-              <defs>
-                <linearGradient id="eg" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stop-color="#8ef0cf"/><stop offset="1" stop-color="#8ab8ff"/>
-                </linearGradient>
-              </defs>
-            </svg>
-          </div>
-          <h2 class="empty-title">One prompt, many minds.</h2>
-          <p class="empty-sub">Chat with any model, or flip on <strong>Auto</strong> to plan, draft and polish across several models automatically.</p>
+          <h2 class="empty-title">How can I help?</h2>
+          <p class="empty-sub">Chat with any model, or turn on <strong>Auto</strong> to plan, draft and polish across several of them.</p>
           <div class="suggestions" id="suggestions">
             <button class="suggestion" data-prompt="Explain how transformers work, with a tiny runnable JS demo of attention.">Explain transformers + a JS demo</button>
             <button class="suggestion" data-prompt="Research the latest news about WebGPU and summarize what matters for web developers.">Research WebGPU news</button>
@@ -112,12 +109,27 @@
                 <span class="chip-label" id="modelChipLabel">Model</span>
                 <i data-lucide="chevron-down" class="chip-caret"></i>
               </button>
-              <!-- Thought level -->
-              <button class="chip" id="btnThought" data-testid="button-thought" aria-haspopup="menu" aria-expanded="false">
-                <i data-lucide="brain"></i>
-                <span id="thoughtChipLabel">Balanced</span>
-                <i data-lucide="chevron-down" class="chip-caret"></i>
-              </button>
+              <!-- Reasoning effort slider -->
+              <div class="reasoning-slider" id="reasoningSlider"
+                role="slider" tabindex="0"
+                aria-label="Reasoning effort"
+                aria-valuemin="1" aria-valuemax="5" aria-valuenow="3"
+                aria-valuetext="Balanced"
+                title="Reasoning effort">
+                <i data-lucide="sparkles" class="rs-icon" aria-hidden="true"></i>
+                <div class="rs-track" id="rsTrack">
+                  <div class="rs-fill" id="rsFill"></div>
+                  <div class="rs-thumb" id="rsThumb"><span class="rs-thumb-shine"></span></div>
+                  <div class="rs-stops">
+                    <button type="button" data-i="0" aria-label="Off" tabindex="-1"></button>
+                    <button type="button" data-i="1" aria-label="Quick" tabindex="-1"></button>
+                    <button type="button" data-i="2" aria-label="Balanced" tabindex="-1"></button>
+                    <button type="button" data-i="3" aria-label="Deep" tabindex="-1"></button>
+                    <button type="button" data-i="4" aria-label="Max" tabindex="-1"></button>
+                  </div>
+                </div>
+                <span class="rs-label" id="rsLabel">Balanced</span>
+              </div>
               <!-- Auto ensemble toggle -->
               <button class="chip" id="btnAuto" data-testid="button-auto" aria-pressed="false" title="Auto mode: plan, draft and polish with multiple models">
                 <i data-lucide="layers"></i>
@@ -145,11 +157,11 @@
               <button class="pop-tab active" data-tab="mine" role="tab">Your models</button>
               <button class="pop-tab" data-tab="free" role="tab">Free · no key</button>
             </div>
+            <div class="pop-search" id="popSearchWrap">
+              <i data-lucide="search"></i>
+              <input type="text" id="popSearch" placeholder="Search models…" autocomplete="off" aria-label="Search models" />
+            </div>
             <div class="pop-body" id="popModelBody"></div>
-          </div>
-
-          <div class="popover popover-thought" id="popThought" hidden>
-            <div class="pop-body" id="popThoughtBody"></div>
           </div>
 
           <div class="popover popover-github" id="popGitHub" hidden>
@@ -180,7 +192,7 @@
         </section>
         <section>
           <h3><i data-lucide="zap"></i>Free models</h3>
-          <p>The <em>Free · no key</em> tab auto-fetches live models that need no account or API key. Free tier is rate-limited — if a request is throttled, wait ~30s or add your own model.</p>
+          <p>The <em>Free · no key</em> tab auto-fetches live models that need no account or API key, from several keyless providers. Free tiers are rate-limited — if a request is throttled, wait ~30s or add your own model.</p>
         </section>
         <section>
           <h3><i data-lucide="layers"></i>Auto mode</h3>

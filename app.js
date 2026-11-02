@@ -64,8 +64,67 @@ document.addEventListener('error', (e) => {
 
 /* ---------------- constants ---------------- */
 
-const FREE_ENDPOINT = 'https://text.pollinations.ai/openai';
 const FREE_MODELS_URL = 'https://text.pollinations.ai/models';
+const DISCOVERY_FEED = 'https://stillworks.supercapybara.com/api/llm/up';
+
+/* keyless providers we trust (CORS-verified): host -> display info */
+const PROVIDERS = {
+  'text.pollinations.ai': { name: 'Pollinations', domain: 'pollinations.ai', base: 'https://text.pollinations.ai', path: '/openai', seedModels: ['openai-fast'] },
+  'oai.endpoints.kepler.ai.cloud.ovh.net': { name: 'OVH', domain: 'ovhcloud.com', base: 'https://oai.endpoints.kepler.ai.cloud.ovh.net', path: '/v1/chat/completions', seedModels: ['gpt-oss-120b', 'gpt-oss-20b', 'Qwen3.6-27B', 'Qwen3.5-397B-A17B', 'Qwen2.5-VL-72B-Instruct', 'Meta-Llama-3_3-70B-Instruct', 'Mistral-Small-3.2-24B-Instruct'] },
+  'api.free.ai': { name: 'Free.ai', domain: 'free.ai', base: 'https://api.free.ai', path: '/v1/chat/completions', seedModels: ['deepseek-r1', 'qwen3-coder', 'qwen3-8b', 'qwen25-vl', 'mistral', 'qwen-vl'] },
+  'api.llm7.io': { name: 'LLM7', domain: 'llm7.io', base: 'https://api.llm7.io', path: '/v1/chat/completions', seedModels: ['codestral-latest', 'gpt-oss:20b', 'nemotron-3-nano:30b', 'minimax-m2.7'] },
+};
+
+/* model family -> favicon domain (icons for auto-fetched models) */
+const MODEL_ICON_MAP = [
+  [/gpt-oss|openai-|gpt-4|gpt-5|o1|o3/i, 'openai.com'],
+  [/claude|anthropic/i, 'anthropic.com'],
+  [/deepseek/i, 'deepseek.com'],
+  [/qwen/i, 'qwen.ai'],
+  [/codestral|mistral|nemo/i, 'mistral.ai'],
+  [/llama|meta-/i, 'meta.com'],
+  [/grok/i, 'x.ai'],
+  [/gemini/i, 'gemini.google.com'],
+  [/kimi|moonshot/i, 'moonshot.ai'],
+  [/nemotron/i, 'nvidia.com'],
+  [/cohere/i, 'cohere.com'],
+  [/minimax/i, 'minimax.io'],
+  [/glm|zhipu/i, 'chatglm.cn'],
+];
+
+function modelIconUrl(name) {
+  for (const [re, domain] of MODEL_ICON_MAP) {
+    if (re.test(name)) return `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+  }
+  return null;
+}
+
+/* short family label used for avatar initials fallback */
+function modelInitials(name) {
+  const n = String(name);
+  const m = /gpt-oss|deepseek|qwen|llama|mistral|codestral|nemo|gemini|grok|glm|minimax|kimi|nemotron|claude/i.exec(n);
+  if (m) return m[0].slice(0, 2).toUpperCase();
+  return n.replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || 'AI';
+}
+
+/* human-friendly display name for a raw model id */
+function prettifyModelName(id) {
+  return String(id)
+    .replace(/_/g, '-')
+    .replace(/:/g, ' ')
+    .replace(/-Instruct(-\d{4})?$/i, '')
+    .replace(/-Turbo$/i, '')
+    .replace(/-(\d)-(\d+B)\b/, '.$1 $2')          /* Llama-3-3-70B -> 3.3 70B */
+    .replace(/(\d+(\.\d+)?)([bB])(?![a-z0-9])/g, '$1B')
+    .replace(/(\d+)\.(\d+)([A-Z][a-zA-Z]+)/g, '$1.$2 $3')
+    .split('-')
+    .map(part => /^[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part)
+    .join(' ')
+    .replace(/\bOpenai\b/g, 'OpenAI')
+    .replace(/\bGpt\b/g, 'GPT')
+    .replace(/\bOss\b/g, 'OSS')
+    .replace(/\bGlm\b/g, 'GLM');
+}
 
 const THOUGHT_LEVELS = [
   { id: 'off', name: 'Off', desc: 'Answer directly, minimal deliberation' },
@@ -210,33 +269,105 @@ async function loadMyModels() {
   }
 }
 
+/* build one free-model entry from a discovery feed row */
+function feedEntryToModel(row, provider) {
+  const id = row.model || row.id || row.name;
+  const caps = row.capabilities || {};
+  const tools = (caps.tools && caps.tools.supported) === true;
+  const vision = (caps.vision && caps.vision.supported) === true;
+  const attempts = Number(row.recent_attempts || 0);
+  const successes = Number(row.recent_successes || 0);
+  const ratio = attempts > 0 ? successes / attempts : null;
+  return {
+    uid: `free:${provider.name}:${id}`,
+    id,
+    name: prettifyModelName(id),
+    company: provider.name,
+    provider: provider.name,
+    icon: modelIconUrl(id),
+    initials: modelInitials(id),
+    baseUrl: provider.base + provider.path,
+    apiKey: '',
+    model: id,
+    tools,
+    reasoning: !!row.reasoning || /deepseek-r1|gpt-oss|reason/i.test(id),
+    vision,
+    source: 'free',
+    ratio,
+    latency: row.latency_ms || null,
+  };
+}
+
 async function loadFreeModels() {
   if (state.freeFetched) return;
+  const models = [];
+  const byKey = new Map();
+
+  /* 1) hourly-verified directory — source of truth for providers + reliability */
+  try {
+    const res = await fetch(DISCOVERY_FEED, { cache: 'no-cache' });
+    if (res.ok) {
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : (Array.isArray(data.models) ? data.models : []);
+      for (const row of rows) {
+        if (!row || row.chat_capable === false || row.openai_compatible === false) continue;
+        const host = String(row.base_url || '').replace(/^https?:\/\//, '').split('/')[0];
+        const provider = PROVIDERS[host];
+        if (!provider) continue; // only CORS-friendly keyless providers
+        const attempts = Number(row.recent_attempts || 0);
+        const successes = Number(row.recent_successes || 0);
+        if (attempts >= 3 && successes === 0) continue; // dead endpoint
+        const m = feedEntryToModel(row, provider);
+        byKey.set(m.uid, m);
+        models.push(m);
+      }
+    }
+  } catch (e) { /* feed unreachable — fall back to provider lists below */ }
+
+  /* 2) Pollinations' own model list (may be broader than the feed's row) */
   try {
     const res = await fetch(FREE_MODELS_URL, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const list = Array.isArray(data) ? data : [];
-    state.freeModels = list
-      .filter(m => (m.input_modalities || ['text']).includes('text'))
-      .map(m => ({
-        uid: `free:${m.name}`,
-        id: m.name,
-        name: m.name,
-        company: 'Pollinations · free',
-        icon: null,
-        baseUrl: FREE_ENDPOINT,
-        apiKey: '',
-        model: m.name,
-        tools: m.tools !== false,
-        reasoning: !!m.reasoning,
-        vision: !!m.vision,
-        source: 'free',
-      }));
-    state.freeFetched = true;
-  } catch (e) {
-    state.freeModels = [];
+    if (res.ok) {
+      const list = await res.json();
+      for (const p of (Array.isArray(list) ? list : [])) {
+        if ((p.input_modalities || ['text']).includes('text') === false) continue;
+        const provider = PROVIDERS['text.pollinations.ai'];
+        const row = {
+          model: p.name,
+          reasoning: !!p.reasoning,
+          capabilities: { tools: { supported: p.tools === true }, vision: { supported: p.vision === true } },
+        };
+        const m = feedEntryToModel(row, provider);
+        if (byKey.has(m.uid)) continue;
+        const fed = models.find(x => x.provider === provider.name && x.id === p.name);
+        if (fed) continue; // already have this one with stats
+        byKey.set(m.uid, m);
+        models.push(m);
+      }
+    }
+  } catch (e) { /* offline — whatever the feed gave us stands */ }
+
+  /* 3) last-resort static seed so the tab is never empty */
+  if (!models.length) {
+    for (const [host, provider] of Object.entries(PROVIDERS)) {
+      if (host === 'text.pollinations.ai') continue;
+      for (const id of (provider.seedModels || [])) {
+        const m = feedEntryToModel({ model: id }, provider);
+        byKey.set(m.uid, m);
+        models.push(m);
+      }
+    }
   }
+
+  /* sort: reliability (desc), then latency */
+  models.sort((a, b) => {
+    const ra = a.ratio ?? .5, rb = b.ratio ?? .5;
+    if (rb !== ra) return rb - ra;
+    return (a.latency ?? 9999) - (b.latency ?? 9999);
+  });
+
+  state.freeModels = models;
+  state.freeFetched = true;
 }
 
 function defaultModel() {
@@ -272,7 +403,7 @@ function loadPersisted() {
 /* ---------------- icons / avatars ---------------- */
 
 function avatarHTML(m, cls = 'model-avatar') {
-  const initials = esc((m.company === 'Pollinations · free' ? m.name : (m.company || m.name || '?')).slice(0, 2).toUpperCase());
+  const initials = esc(m.initials || (m.company || m.name || '?').slice(0, 2).toUpperCase());
   if (m.icon && /^https?:\/\//.test(m.icon)) {
     return `<span class="${cls}"><img src="${esc(m.icon)}" alt="" loading="lazy" data-fallback="${initials}"></span>`;
   }
@@ -534,12 +665,11 @@ const promptInput = $('#promptInput');
 const composer = $('#composer');
 
 function closeAllPopovers() {
-  for (const p of ['#popModel', '#popThought', '#popGitHub']) {
+  for (const p of ['#popModel', '#popGitHub']) {
     const el = $(p);
-    el.hidden = true;
+    if (el) el.hidden = true;
   }
   $('#btnModel').setAttribute('aria-expanded', 'false');
-  $('#btnThought').setAttribute('aria-expanded', 'false');
 }
 
 function togglePopover(popSel, btnSel, onOpen) {
@@ -554,7 +684,7 @@ function togglePopover(popSel, btnSel, onOpen) {
 }
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.popover') && !e.target.closest('#btnModel') && !e.target.closest('#btnThought') && !e.target.closest('#btnGitHub')) {
+  if (!e.target.closest('.popover') && !e.target.closest('#btnModel') && !e.target.closest('#btnGitHub')) {
     closeAllPopovers();
   }
 });
@@ -580,9 +710,11 @@ $('#btnModel').addEventListener('click', () => {
 function renderModelPopover() {
   const body = $('#popModelBody');
   $$('.pop-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === modelTab));
-  const models = modelTab === 'mine' ? state.myModels : state.freeModels;
   const selected = defaultModel();
-  if (!models.length) {
+  const q = ($('#popSearch')?.value || '').trim().toLowerCase();
+  let models = modelTab === 'mine' ? state.myModels : state.freeModels;
+  if (q) models = models.filter(m => (m.name + ' ' + (m.company || '') + ' ' + (m.id || '')).toLowerCase().includes(q));
+  if (!models.length && !q) {
     if (modelTab === 'mine') {
       body.innerHTML = `<div class="pop-empty">
         <i data-lucide="plug-zap"></i>
@@ -594,16 +726,47 @@ function renderModelPopover() {
     refreshIcons();
     return;
   }
+  if (!models.length && q) {
+    body.innerHTML = `<div class="pop-empty"><i data-lucide="search-x"></i><p>No models match “${esc(q)}”.</p></div>`;
+    refreshIcons();
+    return;
+  }
   body.innerHTML = '';
-  for (const m of models) {
-    const row = document.createElement('button');
-    row.className = `model-row${selected && modelUid(selected) === modelUid(m) ? ' selected' : ''}`;
-    row.setAttribute('data-testid', `model-row-${m.id}`);
-    row.innerHTML = `
+
+  /* group free models by provider */
+  if (modelTab === 'free') {
+    const groups = new Map();
+    for (const m of models) {
+      if (!groups.has(m.provider)) groups.set(m.provider, []);
+      groups.get(m.provider).push(m);
+    }
+    for (const [prov, list] of groups) {
+      const info = Object.values(PROVIDERS).find(p => p.name === prov);
+      const head = document.createElement('div');
+      head.className = 'pop-group';
+      if (info) head.innerHTML = `<img src="https://icons.duckduckgo.com/ip3/${info.domain}.ico" alt="" onerror="this.remove()">${esc(prov)}`;
+      else head.textContent = prov;
+      body.appendChild(head);
+      for (const m of list) body.appendChild(modelRowEl(m, selected));
+    }
+  } else {
+    for (const m of models) body.appendChild(modelRowEl(m, selected));
+  }
+  refreshIcons();
+}
+
+function modelRowEl(m, selected) {
+  const row = document.createElement('button');
+  row.className = `model-row${selected && modelUid(selected) === modelUid(m) ? ' selected' : ''}`;
+  row.setAttribute('data-testid', `model-row-${m.id}`);
+  const sub = m.source === 'free'
+    ? `${esc(m.company)}${m.ratio != null ? ` · ${Math.round(m.ratio * 100)}% ok` : ''}`
+    : esc(m.company || '');
+  row.innerHTML = `
       ${avatarHTML(m)}
       <span class="model-info">
         <span class="model-name">${esc(m.name)}</span>
-        <span class="model-company">${esc(m.company)}</span>
+        <span class="model-company">${sub}</span>
       </span>
       <span class="model-badges">
         ${m.source === 'free' ? '<span class="mbadge free">FREE</span>' : ''}
@@ -611,13 +774,11 @@ function renderModelPopover() {
         ${m.tools ? '<span class="mbadge tools"><i data-lucide="wrench"></i></span>' : ''}
         ${m.vision ? '<span class="mbadge vision"><i data-lucide="eye"></i></span>' : ''}
       </span>`;
-    row.addEventListener('click', () => {
-      selectModel(m);
-      closeAllPopovers();
-    });
-    body.appendChild(row);
-  }
-  refreshIcons();
+  row.addEventListener('click', () => {
+    selectModel(m);
+    closeAllPopovers();
+  });
+  return row;
 }
 
 $$('.pop-tab').forEach(t => t.addEventListener('click', async () => {
@@ -646,29 +807,93 @@ function updateModelChip() {
   auto.setAttribute('aria-pressed', String(state.autoMode));
 }
 
-/* thought popover */
-$('#btnThought').addEventListener('click', () => {
-  togglePopover('#popThought', '#btnThought', () => renderThoughtPopover());
+/* reasoning slider */
+const rs = {
+  root: $('#reasoningSlider'),
+  track: $('#rsTrack'),
+  fill: $('#rsFill'),
+  thumb: $('#rsThumb'),
+  label: $('#rsLabel'),
+  stops: $$('#rsTrack .rs-stops button'),
+};
+
+function rsSetLevel(idx, { animate = true } = {}) {
+  const lv = THOUGHT_LEVELS[idx];
+  if (!lv) return;
+  state.thoughtLevel = lv.id;
+  saveSettings();
+  rs.root.setAttribute('aria-valuenow', String(idx + 1));
+  rs.root.setAttribute('aria-valuetext', lv.name);
+  const pct = idx / (THOUGHT_LEVELS.length - 1);
+  rs.fill.style.width = `max(0px, calc(${(pct * 100).toFixed(2)}% - 2px))`;
+  rs.thumb.style.left = `${(pct * 100).toFixed(2)}%`;
+  rs.stops.forEach((s, i) => {
+    if (i <= idx) s.setAttribute('data-filled', '');
+    else s.removeAttribute('data-filled');
+  });
+  if (rs.label.textContent !== lv.name) {
+    rs.label.textContent = lv.name;
+    if (animate) {
+      rs.label.classList.remove('swap');
+      void rs.label.offsetWidth; // restart animation
+      rs.label.classList.add('swap');
+      rs.thumb.classList.remove('pop');
+      void rs.thumb.offsetWidth;
+      rs.thumb.classList.add('pop');
+    }
+  }
+}
+
+function rsIndexFromEvent(e) {
+  const rect = rs.track.getBoundingClientRect();
+  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  const pct = Math.min(1, Math.max(0, x / rect.width));
+  return Math.round(pct * (THOUGHT_LEVELS.length - 1));
+}
+
+let rsDragging = false;
+rs.track.addEventListener('pointerdown', (e) => {
+  rsDragging = true;
+  rs.track.setPointerCapture?.(e.pointerId);
+  rsSetLevel(rsIndexFromEvent(e));
+});
+rs.track.addEventListener('pointermove', (e) => {
+  if (rsDragging) rsSetLevel(rsIndexFromEvent(e));
+});
+rs.track.addEventListener('pointerup', () => { rsDragging = false; });
+rs.track.addEventListener('pointercancel', () => { rsDragging = false; });
+rs.stops.forEach((s, i) => s.addEventListener('click', (e) => {
+  e.stopPropagation();
+  rsSetLevel(i);
+}));
+rs.root.addEventListener('keydown', (e) => {
+  const cur = THOUGHT_LEVELS.findIndex(l => l.id === state.thoughtLevel);
+  if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); rsSetLevel(Math.min(cur + 1, THOUGHT_LEVELS.length - 1)); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); rsSetLevel(Math.max(cur - 1, 0)); }
+  else if (e.key === 'Home') { e.preventDefault(); rsSetLevel(0); }
+  else if (e.key === 'End') { e.preventDefault(); rsSetLevel(THOUGHT_LEVELS.length - 1); }
 });
 
-function renderThoughtPopover() {
-  const body = $('#popThoughtBody');
-  body.innerHTML = '';
-  for (const lv of THOUGHT_LEVELS) {
-    const row = document.createElement('button');
-    row.className = `thought-row${state.thoughtLevel === lv.id ? ' selected' : ''}`;
-    row.innerHTML = `<i data-lucide="${lv.id === 'off' ? 'zap-off' : 'brain'}"></i>
-      <span><span class="t-name">${lv.name}</span><br><span class="t-desc">${lv.desc}</span></span>`;
-    row.addEventListener('click', () => {
-      state.thoughtLevel = lv.id;
-      saveSettings();
-      $('#thoughtChipLabel').textContent = lv.name;
-      closeAllPopovers();
-    });
-    body.appendChild(row);
-  }
+/* model search */
+$('#popSearch').addEventListener('input', () => renderModelPopover());
+$('#popSearch').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.target.value = ''; renderModelPopover(); e.target.blur(); }
+});
+
+/* theme */
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  const btn = $('#btnTheme');
+  if (!btn) return;
+  btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  btn.innerHTML = `<i data-lucide="${t === 'dark' ? 'sun' : 'moon'}"></i>`;
   refreshIcons();
 }
+$('#btnTheme').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  store.set('prism.theme', next);
+  applyTheme(next);
+});
 
 /* auto mode */
 $('#btnAuto').addEventListener('click', () => {
@@ -1472,12 +1697,14 @@ $('#sidebarScrim').addEventListener('click', closeSidebarMobile);
 
 async function boot() {
   loadPersisted();
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   await loadMyModels();
   await loadFreeModels();
   const m = defaultModel();
   if (m && !state.selectedModelId) state.selectedModelId = modelUid(m);
   updateModelChip();
-  $('#thoughtChipLabel').textContent = (THOUGHT_LEVELS.find(l => l.id === state.thoughtLevel) || THOUGHT_LEVELS[2]).name;
+  const lvIdx = Math.max(0, THOUGHT_LEVELS.findIndex(l => l.id === state.thoughtLevel));
+  rsSetLevel(lvIdx, { animate: false });
   renderChatList();
   // open the most recent conversation if one exists
   if (state.conversations.length) {

@@ -9,10 +9,12 @@ A minimal, animated multi-model AI chat that runs entirely in the browser — a 
 ## Features
 
 - **Any model** — every OpenAI-compatible endpoint works: change the base URL, drop in an API key.
-- **Free models, no key** — the "Free · no key" tab auto-fetches live models (via Pollinations' classic API). Rate-limited: one request at a time, ~30s apart.
+- **Free models, no key** — the "Free · no key" tab auto-discovers ~30 live keyless models across four providers (Pollinations, OVH, Free.ai, LLM7), verified hourly via a public directory, with provider icons, capability badges, and reliability stats. Free tiers are rate-limited.
 - **Agent abilities** — capable models can fetch web pages, search, read GitHub repos, and run JavaScript in a sandbox. If a model can't use a tool, it just continues without it.
 - **Auto mode** — a multi-model pipeline: one model plans, another drafts, a third polishes and connects everything into the final answer.
-- **Thought levels** — from Off to Max reasoning effort, with a live "thinking" panel for reasoning models.
+- **Reasoning slider** — from Off to Max reasoning effort, with a live "thinking" panel for reasoning models.
+- **Light & dark themes** — warm ivory and warm charcoal, with a toggle that remembers your choice.
+- **iPad friendly** — touch-sized targets, drawer sidebar, and full support for the system Reduce Motion setting.
 - **GitHub repo connector** — paste `owner/repo` and the agent can read the tree, README, and files while it works.
 - **File attachments** — text files and images (vision models).
 
