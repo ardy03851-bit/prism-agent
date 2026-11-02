@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prism — AI Agent Workspace</title>
+  <meta name="description" content="A minimal multi-model AI agent workspace. Add models via models.json, use free models with no API key, and let the ensemble mode plan, draft, and polish." />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar" id="sidebar" aria-label="Conversations">
+      <div class="sidebar-top">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+              <path d="M16 3 L28 26 H4 Z" stroke="url(#g1)" stroke-width="2.4" stroke-linejoin="round"/>
+              <path d="M16 3 L16 26" stroke="url(#g1)" stroke-width="1.6" opacity=".55"/>
+              <path d="M16 3 L4 26" stroke="url(#g1)" stroke-width="1.6" opacity=".55"/>
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#8ef0cf"/><stop offset="1" stop-color="#8ab8ff"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="brand-name">Prism</div>
+        </div>
+        <button class="btn-new-chat" id="btnNewChat" data-testid="button-new-chat">
+          <i data-lucide="plus"></i>
+          <span>New chat</span>
+        </button>
+      </div>
+      <nav class="chat-list" id="chatList" role="list" aria-label="Chat history"></nav>
+      <div class="sidebar-foot">
+        <div class="sidebar-foot-row">
+          <span class="free-badge"><span class="pulse-dot" aria-hidden="true"></span>Free models online</span>
+        </div>
+        <p class="sidebar-note">Add your own models in <code>models.json</code> — proxy URL, API key, model ID and icon.</p>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
+
+    <!-- ============ MAIN ============ -->
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="btnMenu" aria-label="Open menu">
+          <i data-lucide="menu"></i>
+        </button>
+        <h1 class="topbar-title" id="topbarTitle">New chat</h1>
+        <div class="topbar-actions">
+          <button class="chip chip-ghost only-desktop" id="btnAbout" data-testid="button-about">
+            <i data-lucide="sparkles"></i><span>How it works</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="messages" id="messages" aria-live="polite">
+        <!-- Empty state -->
+        <div class="empty-state" id="emptyState">
+          <div class="empty-orb" aria-hidden="true">
+            <svg viewBox="0 0 64 64" width="56" height="56" fill="none">
+              <path d="M32 6 L56 52 H8 Z" stroke="url(#eg)" stroke-width="3" stroke-linejoin="round"/>
+              <path d="M32 6 L32 52" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
+              <path d="M32 6 L8 52" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
+              <path d="M20 29 L32 52 L44 29" stroke="url(#eg)" stroke-width="1.8" opacity=".6"/>
+              <defs>
+                <linearGradient id="eg" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#8ef0cf"/><stop offset="1" stop-color="#8ab8ff"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h2 class="empty-title">One prompt, many minds.</h2>
+          <p class="empty-sub">Chat with any model, or flip on <strong>Auto</strong> to plan, draft and polish across several models automatically.</p>
+          <div class="suggestions" id="suggestions">
+            <button class="suggestion" data-prompt="Explain how transformers work, with a tiny runnable JS demo of attention.">Explain transformers + a JS demo</button>
+            <button class="suggestion" data-prompt="Research the latest news about WebGPU and summarize what matters for web developers.">Research WebGPU news</button>
+            <button class="suggestion" data-prompt="Write a Python script that renames my photos by EXIF date, then walk me through it.">A photo-renaming script</button>
+            <button class="suggestion" data-prompt="Design a study plan to learn linear algebra in 30 days. Be specific and realistic.">30-day linear algebra plan</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ COMPOSER ============ -->
+      <div class="composer-zone">
+        <div class="composer" id="composer">
+         <div class="composer-card">
+          <div class="attachments" id="attachments" hidden></div>
+          <textarea
+            id="promptInput"
+            class="prompt-input"
+            rows="1"
+            placeholder="Ask anything — or connect a repo and put the agent to work…"
+            aria-label="Message"
+            data-testid="input-prompt"
+          ></textarea>
+
+          <div class="composer-row">
+            <div class="composer-controls">
+              <!-- Model selector -->
+              <button class="chip" id="btnModel" data-testid="button-model" aria-haspopup="menu" aria-expanded="false">
+                <span class="chip-icon" id="modelChipIcon"></span>
+                <span class="chip-label" id="modelChipLabel">Model</span>
+                <i data-lucide="chevron-down" class="chip-caret"></i>
+              </button>
+              <!-- Thought level -->
+              <button class="chip" id="btnThought" data-testid="button-thought" aria-haspopup="menu" aria-expanded="false">
+                <i data-lucide="brain"></i>
+                <span id="thoughtChipLabel">Balanced</span>
+                <i data-lucide="chevron-down" class="chip-caret"></i>
+              </button>
+              <!-- Auto ensemble toggle -->
+              <button class="chip" id="btnAuto" data-testid="button-auto" aria-pressed="false" title="Auto mode: plan, draft and polish with multiple models">
+                <i data-lucide="layers"></i>
+                <span>Auto</span>
+              </button>
+            </div>
+            <div class="composer-actions">
+              <button class="icon-btn" id="btnGitHub" aria-label="Connect a GitHub repository" title="Connect a GitHub repository" data-testid="button-github">
+                <i data-lucide="github"></i>
+              </button>
+              <button class="icon-btn" id="btnAttach" aria-label="Attach files" title="Attach files" data-testid="button-attach">
+                <i data-lucide="paperclip"></i>
+              </button>
+              <input type="file" id="fileInput" multiple hidden />
+              <button class="send-btn" id="btnSend" aria-label="Send message" data-testid="button-send">
+                <i data-lucide="arrow-up"></i>
+              </button>
+            </div>
+          </div>
+         </div>
+
+          <!-- ============ POPOVERS ============ -->
+          <div class="popover popover-model" id="popModel" hidden>
+            <div class="pop-tabs" role="tablist">
+              <button class="pop-tab active" data-tab="mine" role="tab">Your models</button>
+              <button class="pop-tab" data-tab="free" role="tab">Free · no key</button>
+            </div>
+            <div class="pop-body" id="popModelBody"></div>
+          </div>
+
+          <div class="popover popover-thought" id="popThought" hidden>
+            <div class="pop-body" id="popThoughtBody"></div>
+          </div>
+
+          <div class="popover popover-github" id="popGitHub" hidden>
+            <div class="pop-title">Connect a GitHub repository</div>
+            <p class="pop-desc">The agent can read the repo's tree, README and files while it works.</p>
+            <form class="gh-form" id="ghForm">
+              <i data-lucide="github" class="gh-icon"></i>
+              <input type="text" id="ghInput" placeholder="owner/repo or full URL" autocomplete="off" aria-label="Repository" />
+              <button type="submit" class="btn-mini">Connect</button>
+            </form>
+            <div class="gh-status" id="ghStatus"></div>
+          </div>
+        </div>
+        <p class="composer-hint">Prism can make mistakes — verify important output. <span class="only-desktop">Enter to send · Shift+Enter for a new line</span></p>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ ABOUT DIALOG ============ -->
+  <dialog class="dialog" id="aboutDialog">
+    <div class="dialog-card">
+      <button class="dialog-close icon-btn" id="aboutClose" aria-label="Close"><i data-lucide="x"></i></button>
+      <h2>How Prism works</h2>
+      <div class="about-grid">
+        <section>
+          <h3><i data-lucide="plug"></i>Your models</h3>
+          <p>Add any OpenAI-compatible endpoint in <code>models.json</code> — proxy URL, API key, model ID, and an icon (URL, emoji or initials). They appear under <em>Your models</em>.</p>
+        </section>
+        <section>
+          <h3><i data-lucide="zap"></i>Free models</h3>
+          <p>The <em>Free · no key</em> tab auto-fetches live models that need no account or API key. Free tier is rate-limited — if a request is throttled, wait ~30s or add your own model.</p>
+        </section>
+        <section>
+          <h3><i data-lucide="layers"></i>Auto mode</h3>
+          <p>With Auto on, several models work in sequence: one plans, another drafts, a third polishes and connects everything into the final answer. Any stage that fails is skipped gracefully.</p>
+        </section>
+        <section>
+          <h3><i data-lucide="wrench"></i>Agent abilities</h3>
+          <p>Capable models can fetch web pages, search, read GitHub repos and run JavaScript in a sandbox. If a model can't use a tool, it simply continues without it.</p>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.548.0/dist/umd/lucide.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@18.1.2/lib/marked.umd.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.0/dist/purify.min.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>

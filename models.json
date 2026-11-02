@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "id": "my-model-example",
+      "name": "My Model (example)",
+      "company": "OpenAI",
+      "icon": "\ud83e\udd16",
+      "baseUrl": "https://api.openai.com/v1/chat/completions",
+      "apiKey": "sk-REPLACE-ME",
+      "model": "gpt-4o-mini",
+      "tools": true,
+      "reasoning": false,
+      "vision": true
+    }
+  ]
+}
