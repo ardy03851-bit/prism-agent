@@ -2,6 +2,8 @@
 
 A minimal, animated multi-model AI chat that runs entirely in the browser — a single static site, perfect for GitHub Pages.
 
+**Live:** https://ardy03851-bit.github.io/prism-agent/
+
 **Try it live:** the site works out of the box with free models that need no account or API key. Add your own models any time via `models.json`.
 
 ## Features
